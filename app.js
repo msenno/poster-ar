@@ -117,9 +117,7 @@
       $('plain-links').appendChild(link);
     });
     const names = plots.map(plot => plot.label).join(' · ');
-    document.title = `Poster AR — ${names}`;
     $('plot-names').textContent = names;
-    $('heading').textContent = 'Explore the extra plots';
     $('ar-caption').textContent = `AR, top to bottom: ${names}`;
   }
 
