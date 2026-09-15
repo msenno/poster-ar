@@ -1,6 +1,10 @@
 (() => {
   'use strict';
   const config = window.POSTER_AR;
+  // Retain the last estimated pose across brief gaps in image tracking.
+  // This counts processed tracking updates, not seconds.
+  const missTolerance = Number.isInteger(config.missTolerance) && config.missTolerance >= 0
+    ? config.missTolerance : 15;
   const $ = id => document.getElementById(id);
   const message = text => { $('message').textContent = text; };
   let pages = [], pageIndex = -1, plots = [], scene = null, anchor = null;
@@ -199,7 +203,7 @@
       $('tracking').textContent = 'Opening camera…';
       scene = document.createElement('a-scene');
       scene.setAttribute('embedded', '');
-      scene.setAttribute('mindar-image', `imageTargetSrc: ${config.targetFile}; autoStart: false; uiLoading: no; uiScanning: no; uiError: no;`);
+      scene.setAttribute('mindar-image', `imageTargetSrc: ${config.targetFile}; missTolerance: ${missTolerance}; autoStart: false; uiLoading: no; uiScanning: no; uiError: no;`);
       scene.setAttribute('renderer', 'colorManagement: true; alpha: true; antialias: true');
       scene.setAttribute('vr-mode-ui', 'enabled: false');
       scene.setAttribute('device-orientation-permission-ui', 'enabled: false');
