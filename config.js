@@ -65,8 +65,8 @@ window.POSTER_AR = {
       label: 'Indoor stability',
       targetImage: './assets/03_indoor.png',
       overlays: [
-        {label: 'Indoor - figure 1', src: './assets/indoor_01.png'},
-        {label: 'Indoor - figure 2', src: './assets/indoor_02.png'},
+        {label: 'Indoor - figure 1', src: './assets/jmpp.png'},
+        {label: 'Indoor - figure 2', src: './assets/vmpp.png'},
         // {label: 'Indoor - figure 3', src: './assets/indoor_03.png'},
       ],
     },
