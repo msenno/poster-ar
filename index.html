@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <title>Poster AR — extra plots</title>
+  <meta name="description" content="Reveal extra plots beside the printed PCE graph using your phone camera.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='7' width='12' height='18' rx='2' fill='%23087fb6'/%3E%3Crect x='19' y='3' width='10' height='11' rx='2' fill='%23d56a08'/%3E%3Crect x='19' y='18' width='10' height='11' rx='2' fill='%23087fb6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./config.js" defer></script>
+  <script src="./layout.js" defer></script>
+  <script src="./vendor/aframe.min.js" defer></script>
+  <script src="./vendor/mindar-image-aframe.prod.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <main id="setup">
+    <header><span class="brand">Poster AR</span><span class="tag" id="plot-names">Explore the results</span></header>
+    <h1 id="heading">Explore the extra plots</h1>
+    <p class="intro">Point your phone at the PCE graph in the poster. Additional plots will appear on its right.</p>
+    <div class="actions">
+      <button id="start" disabled>Open AR camera</button>
+      <span class="camera-note">Allow camera access when asked.</span>
+    </div>
+    <p id="message" role="status" aria-live="polite">Loading the plots…</p>
+    <p class="hint">Turn your phone sideways and keep the whole PCE graph in view, with space on its right.</p>
+    <div class="preview-label"><span>Layout preview</span><span>Camera off</span></div>
+    <section class="preview" aria-label="Preview of the printed PCE graph with additional plots beside it">
+      <div id="pair">
+        <img id="target-preview" src="./assets/recognition.png" alt="Printed PCE versus time graph, the image recognized by AR.">
+        <div id="plot-stack"></div>
+      </div>
+      <div class="preview-captions"><span>Printed PCE graph</span><span id="ar-caption">AR plots</span></div>
+    </section>
+    <nav id="preview-pager" class="pager" aria-label="Browse plot pages" hidden>
+      <button id="preview-prev" class="secondary" disabled>Previous</button>
+      <select id="preview-page" aria-label="Choose a plot page"></select>
+      <button id="preview-next" class="secondary" disabled>Next</button>
+    </nav>
+    <nav id="plain-links" class="plain-links" aria-label="Full-size plots without AR">
+      <span>View without AR:</span>
+    </nav>
+    <noscript><p>Enable JavaScript to load the plot list and the AR view.</p></noscript>
+  </main>
+  <div id="ar" hidden>
+    <div id="scene-container"></div>
+    <div class="ar-top">
+      <p id="tracking" role="status" aria-live="polite">Opening camera…</p>
+      <button id="stop" class="secondary">Close AR</button>
+    </div>
+    <div class="ar-bottom">
+      <p>Keep the PCE graph in view. The extra plots appear on its right.</p>
+      <nav id="ar-pager" class="pager" aria-label="Browse plot pages in AR" hidden>
+        <button id="ar-prev" class="secondary" disabled>Previous</button>
+        <select id="ar-page" aria-label="Choose a plot page in AR"></select>
+        <button id="ar-next" class="secondary" disabled>Next</button>
+      </nav>
+    </div>
+  </div>
+</body>
+</html>
