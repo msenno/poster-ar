@@ -1,7 +1,7 @@
 // Positions and sizes are measured in widths of the printed PCE image.
 window.POSTER_AR = {
   targetFile: './assets/target.mind',
-  targetImage: './assets/recognition.png',
+  targetImage: './assets/03_indoor.png',
   // Add as many images as you need. Previous/Next controls appear automatically.
   // Entries are shown in order, two per page, from top to bottom.
   // To replace a picture, you can simply overwrite its file in assets/.
