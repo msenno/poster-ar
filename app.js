@@ -5,10 +5,32 @@
   // This counts processed tracking updates, not seconds.
   const missTolerance = Number.isInteger(config.missTolerance) && config.missTolerance >= 0
     ? config.missTolerance : 15;
+  const warmupTolerance = Number.isInteger(config.warmupTolerance) && config.warmupTolerance >= 0
+    ? config.warmupTolerance : 8;
+  const filterMinCF = Number.isFinite(config.filterMinCF) && config.filterMinCF > 0
+    ? config.filterMinCF : 0.001;
+  const filterBeta = Number.isFinite(config.filterBeta) && config.filterBeta >= 0
+    ? config.filterBeta : 0.01;
   const $ = id => document.getElementById(id);
   const message = text => { $('message').textContent = text; };
   let pages = [], pageIndex = -1, plots = [], scene = null, anchor = null;
   let graphics = null, loadingPage = false, startingCamera = false, needsReload = false;
+  const debug = new URLSearchParams(window.location.search).get('arDebug') === '1';
+  let foundCount = 0, lostCount = 0, trackingState = 'waiting';
+  let debugPanel = null;
+  if (debug) {
+    debugPanel = document.createElement('div');
+    debugPanel.id = 'ar-debug';
+    debugPanel.style.cssText = 'position:absolute;top:78px;left:14px;right:14px;z-index:6;padding:8px 10px;background:#fff;color:#172a39;font:12px/1.4 monospace;border-radius:6px;pointer-events:none;';
+    $('ar').appendChild(debugPanel);
+    const notice = document.createElement('p');
+    notice.textContent = 'Tracking test · stability update 3 loaded. Camera event counts will appear in AR.';
+    $('setup').appendChild(notice);
+  }
+  function updateDebug() {
+    if (debugPanel) debugPanel.textContent = `Stability 3 | ${trackingState} | Found: ${foundCount} Lost: ${lostCount} | smoothing: ${filterMinCF}, ${filterBeta} | warmup: ${warmupTolerance}, miss: ${missTolerance}`;
+  }
+  updateDebug();
 
   function updateControls() {
     const locked = loadingPage || startingCamera || needsReload;
@@ -41,21 +63,25 @@
     graphics = new THREE.Group();
     plots.forEach(plot => {
       // Each page owns its textures, which are released when the page changes.
-      const texture = new THREE.Texture(plot.image);
+      // Composite onto white and use one surface per plot. Separate, closely
+      // spaced background planes can compete in the depth buffer on phones.
+      const canvas = document.createElement('canvas');
+      canvas.width = plot.width;
+      canvas.height = plot.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Unable to prepare the plot texture.');
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(plot.image, 0, 0, canvas.width, canvas.height);
+      const texture = new THREE.CanvasTexture(canvas);
       if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
       else texture.encoding = THREE.sRGBEncoding;
       texture.generateMipmaps = false;
       texture.minFilter = THREE.LinearFilter;
       texture.needsUpdate = true;
-      const backing = new THREE.Mesh(
-        new THREE.PlaneGeometry(plot.planeWidth, plot.planeHeight),
-        new THREE.MeshBasicMaterial({color: 0xffffff, side: THREE.DoubleSide, toneMapped: false})
-      );
-      backing.position.set(plot.x, plot.y, 0);
-      graphics.add(backing);
       const imagePlane = new THREE.Mesh(
         new THREE.PlaneGeometry(plot.planeWidth, plot.planeHeight),
-        new THREE.MeshBasicMaterial({map: texture, side: THREE.DoubleSide, transparent: true, toneMapped: false})
+        new THREE.MeshBasicMaterial({map: texture, side: THREE.DoubleSide, transparent: false, toneMapped: false})
       );
       imagePlane.position.set(plot.x, plot.y, plot.z);
       graphics.add(imagePlane);
@@ -203,7 +229,7 @@
       $('tracking').textContent = 'Opening camera…';
       scene = document.createElement('a-scene');
       scene.setAttribute('embedded', '');
-      scene.setAttribute('mindar-image', `imageTargetSrc: ${config.targetFile}; missTolerance: ${missTolerance}; autoStart: false; uiLoading: no; uiScanning: no; uiError: no;`);
+      scene.setAttribute('mindar-image', `imageTargetSrc: ${config.targetFile}; missTolerance: ${missTolerance}; warmupTolerance: ${warmupTolerance}; filterMinCF: ${filterMinCF}; filterBeta: ${filterBeta}; autoStart: false; uiLoading: no; uiScanning: no; uiError: no;`);
       scene.setAttribute('renderer', 'colorManagement: true; alpha: true; antialias: true');
       scene.setAttribute('vr-mode-ui', 'enabled: false');
       scene.setAttribute('device-orientation-permission-ui', 'enabled: false');
@@ -216,14 +242,22 @@
       anchor.setAttribute('mindar-image-target', 'targetIndex: 0');
       scene.appendChild(anchor);
       anchor.addEventListener('targetFound', () => {
+        foundCount += 1;
+        trackingState = 'found';
+        updateDebug();
         $('tracking').textContent = 'Graph found · extra plots on the right';
       });
       anchor.addEventListener('targetLost', () => {
+        lostCount += 1;
+        trackingState = 'lost';
+        updateDebug();
         $('tracking').textContent = 'Point at the PCE graph to bring the plots back';
       });
       scene.addEventListener('arReady', () => {
         startingCamera = false;
         updateControls();
+        trackingState = 'searching';
+        updateDebug();
         $('tracking').textContent = 'Point at the PCE graph';
       });
       scene.addEventListener('arError', () => {
