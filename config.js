@@ -24,6 +24,9 @@ window.POSTER_AR = {
   warmupTolerance: 8,
   filterMinCF: 0.001,
   filterBeta: 0.01,
+  // Autofreeze 1.2 seconds
+  autoFreeze: true,
+  freezeDelayMs: 1200,
 
   // targetImage = the printed image used for recognition (shown in the preview).
   // overlays = the additional figures displayed beside that printed image.
