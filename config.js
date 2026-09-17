@@ -8,7 +8,7 @@ window.POSTER_AR = {
   imagesPerPage: 1,
 
   // Sizes are measured in widths of the complete printed recognition image.
-  overlayWidth: 2,
+  overlayWidth: 4,
   gap: 0.0,
   stackGap: 0.07,
   verticalOffset: 0.0,
