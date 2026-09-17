@@ -10,7 +10,7 @@ window.POSTER_AR = {
 
   // Show two figures at a time. A third figure creates a second gallery page.
   // Change this to 3 to show up to three figures together, stacked vertically.
-  imagesPerPage: 2,
+  imagesPerPage: 1,
 
   // Sizes are measured in widths of the printed recognition image.
   overlayWidth: 0.90,
@@ -38,8 +38,8 @@ window.POSTER_AR = {
       label: 'Device stack',
       targetImage: './assets/00_stack.png',
       overlays: [
-        {label: 'Stack - figure 1', src: './assets/stack_01.png'},
-        {label: 'Stack - figure 2', src: './assets/stack_02.png'},
+        {label: 'Stack - figure 1', src: './assets/Panel1.png'},
+        // {label: 'Stack - figure 2', src: './assets/stack_02.png'},
         // {label: 'Stack - figure 3', src: './assets/stack_03.png'},
       ],
     },
@@ -48,8 +48,8 @@ window.POSTER_AR = {
       label: 'Encapsulation',
       targetImage: './assets/01_encap.png',
       overlays: [
-        {label: 'Encapsulation - figure 1', src: './assets/encap_01.png'},
-        {label: 'Encapsulation - figure 2', src: './assets/encap_02.png'},
+        {label: 'Encapsulation - figure 1', src: './assets/Panel2.png'},
+        //{label: 'Encapsulation - figure 2', src: './assets/encap_02.png'},
         // {label: 'Encapsulation - figure 3', src: './assets/encap_03.png'},
       ],
     },
@@ -58,8 +58,8 @@ window.POSTER_AR = {
       label: 'JV curves',
       targetImage: './assets/02_jv.png',
       overlays: [
-        {label: 'JV - figure 1', src: './assets/jv_01.png'},
-        {label: 'JV - figure 2', src: './assets/jv_02.png'},
+        {label: 'JV - figure 1', src: './assets/Panel3.png'},
+        //{label: 'JV - figure 2', src: './assets/jv_02.png'},
         // {label: 'JV - figure 3', src: './assets/jv_03.png'},
       ],
     },
@@ -68,8 +68,8 @@ window.POSTER_AR = {
       label: 'Indoor stability',
       targetImage: './assets/03_indoor.png',
       overlays: [
-        {label: 'Indoor - figure 1', src: './assets/jmpp.png'},
-        {label: 'Indoor - figure 2', src: './assets/vmpp.png'},
+        {label: 'Indoor - figure 1', src: './assets/Panel4.png'},
+        //{label: 'Indoor - figure 2', src: './assets/vmpp.png'},
         // {label: 'Indoor - figure 3', src: './assets/indoor_03.png'},
       ],
     },
@@ -78,8 +78,8 @@ window.POSTER_AR = {
       label: 'Outdoor stability',
       targetImage: './assets/04_outdoor.png',
       overlays: [
-        {label: 'Outdoor - figure 1', src: './assets/outdoor_01.png'},
-        {label: 'Outdoor - figure 2', src: './assets/outdoor_02.png'},
+        {label: 'Outdoor - figure 1', src: './assets/Panel5.png'},
+        // {label: 'Outdoor - figure 2', src: './assets/outdoor_02.png'},
         // {label: 'Outdoor - figure 3', src: './assets/outdoor_03.png'},
       ],
     },
