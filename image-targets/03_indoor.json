@@ -1,0 +1,23 @@
+{
+  "imagePath": "image-targets/03_indoor_luminance.png",
+  "metadata": null,
+  "name": "03_indoor",
+  "type": "PLANAR",
+  "properties": {
+    "left": 0,
+    "top": 22,
+    "width": 1022,
+    "height": 1363,
+    "isRotated": true,
+    "originalWidth": 1022,
+    "originalHeight": 1406
+  },
+  "resources": {
+    "originalImage": "03_indoor_original.png",
+    "croppedImage": "03_indoor_cropped.png",
+    "thumbnailImage": "03_indoor_thumbnail.png",
+    "luminanceImage": "03_indoor_luminance.png"
+  },
+  "created": 1789643390283,
+  "updated": 1789643390283
+}
