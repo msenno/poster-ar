@@ -8,10 +8,10 @@ window.POSTER_AR = {
   imagesPerPage: 1,
 
   // Sizes are measured in widths of the complete printed recognition image.
-  overlayWidth: 0.90,
-  gap: 0.08,
+  overlayWidth: 2,
+  gap: 0.0,
   stackGap: 0.07,
-  verticalOffset: 0,
+  verticalOffset: 0.0,
 
   // To change a displayed panel, replace its PNG or change overlays[].src.
   // Changing a recognition image requires matching 8th Wall targetData.
