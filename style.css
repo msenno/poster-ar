@@ -13,3 +13,13 @@ button:focus-visible,a:focus-visible{outline:3px solid #eaa142;outline-offset:3p
 .ar-bottom{position:absolute;bottom:max(18px,env(safe-area-inset-bottom));left:max(14px,env(safe-area-inset-left));right:max(14px,env(safe-area-inset-right));text-align:center;background:#142331ed;color:#fff;border-radius:7px;padding:10px 12px;font-size:.95rem;z-index:5}
 [hidden]{display:none!important}@media(max-width:600px){main{padding:20px 18px}.preview{padding:16px 8px}.preview-captions{font-size:.8rem}.actions button{width:100%}.camera-note{font-size:.85rem}.plain-links span{flex-basis:100%}h1{margin-top:24px}.ar-top p,.ar-bottom{font-size:.85rem}}
 .pager{display:flex;align-items:center;gap:10px;margin-top:16px}.pager select{font:inherit;min-width:0;flex:1;min-height:48px;border:1px solid #afc9d6;border-radius:7px;background:#fff;color:#245770;padding:8px;text-overflow:ellipsis}.pager button{flex:none}.pager select:focus-visible{outline:3px solid #eaa142;outline-offset:3px}.ar-bottom p{max-width:none;margin:0}.ar-bottom .pager{margin-top:8px}.ar-bottom .pager select,.ar-bottom .pager button{min-height:42px;font-size:.9rem;padding:6px 10px}@media(max-width:400px){.pager{gap:6px}.pager button{font-size:.85rem;padding:8px}}
+
+/* Live world tracking view */
+#camerafeed{width:100%!important;height:100%!important;display:block}.camera-open{overflow:hidden;touch-action:none}
+.target-picker{display:flex;align-items:center;gap:12px;margin-top:22px;flex-wrap:wrap}
+.target-picker select{font:inherit;max-width:100%;min-height:44px;padding:8px 12px;border:1px solid #afc9d6;border-radius:7px;background:#fff;color:#245770}
+.target-picker select:focus-visible{outline:3px solid #eaa142;outline-offset:3px}
+.credits{margin-top:32px;padding-top:16px;border-top:1px solid #e0e7ec;color:#637887;font-size:.75rem}
+#reset-anchors{margin-top:8px;min-height:38px;padding:6px 12px;font-size:.85rem}
+#ar-debug{position:absolute;top:90px;left:14px;right:14px;z-index:6;padding:8px 10px;border-radius:6px;background:#fff;color:#172a39;font:12px/1.4 monospace;pointer-events:none}
+@media(max-height:480px){.ar-bottom{font-size:.78rem;padding:6px 10px}.ar-bottom p{display:inline}#reset-anchors{margin:0 0 0 12px;min-height:32px}.ar-top p{font-size:.8rem;margin:0}.ar-top button{min-height:38px;padding:6px 12px}}

@@ -5,34 +5,34 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#ffffff">
   <title>ISOS17 - MOED — AR plots</title>
-  <meta name="description" content="Reveal extra plots beside the printed PCE graph using your phone camera.">
+  <meta name="description" content="Explore additional results beside the poster with augmented reality.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='7' width='12' height='18' rx='2' fill='%23087fb6'/%3E%3Crect x='19' y='3' width='10' height='11' rx='2' fill='%23d56a08'/%3E%3Crect x='19' y='18' width='10' height='11' rx='2' fill='%23087fb6'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./style.css">
-  <script src="./config.js?v=multi-target-1" defer></script>
-  <script src="./layout.js" defer></script>
-  <script src="./vendor/aframe.min.js" defer></script>
-  <script src="./vendor/mindar-image-aframe.prod.js" defer></script>
-  <script src="./app.js?v=multi-target-1" defer></script>
-  <script src="./freeze-view.js?v=freeze-1" defer></script>
+  <link rel="stylesheet" href="./style.css?v=world-1">
+  <script src="./config.js?v=world-1" defer></script>
+  <script src="./layout.js?v=world-1" defer></script>
+  <script src="./vendor/three.min.js" defer></script>
+  <script src="./world-anchors.js?v=world-1" defer></script>
+  <script src="./app.js?v=world-1" defer></script>
 </head>
 <body>
   <main id="setup">
     <header><span class="brand">ISOS-17 MOED</span><span class="tag" id="plot-names">Explore the results</span></header>
     <h1 id="heading">Insights on indoor and outdoor testing of co-evaporated MAPI solar cells</h1>
-    <p class="intro">Point your phone at the graph in the poster. Additional plots will appear on its right.</p>
+    <p class="intro">Scan an image on the poster to place its panel beside it. Then move your phone closer to explore the results.</p>
     <div class="actions">
       <button id="start" disabled>Open AR camera</button>
-      <span class="camera-note">Allow camera access when asked.</span>
+      <span class="camera-note">Allow camera and motion access when asked.</span>
     </div>
     <p id="message" role="status" aria-live="polite">Loading the plots…</p>
-    <p class="hint">Turn your phone sideways and keep the whole PCE graph in view, with space on its right.</p>
+    <p class="hint">Use your phone’s rear camera. Move slowly across the poster while tracking starts; once a panel is placed, its recognition image can leave the camera view.</p>
+    <label class="target-picker" for="target-select">Recognition image <select id="target-select"></select></label>
     <div class="preview-label"><span>Layout preview</span><span>Camera off</span></div>
-    <section class="preview" aria-label="Preview of the printed PCE graph with additional plots beside it">
+    <section class="preview" aria-label="Preview of the recognition image and its AR panel">
       <div id="pair">
-        <img id="target-preview" src="./assets/recognition.png" alt="Printed PCE versus time graph, the image recognized by AR.">
+        <img id="target-preview" src="./assets/00_stack.png" alt="Device stack recognition image">
         <div id="plot-stack"></div>
       </div>
-      <div class="preview-captions"><span>Printed PCE graph</span><span id="ar-caption">AR plots</span></div>
+      <div class="preview-captions"><span>Printed recognition image</span><span id="ar-caption">AR plots</span></div>
     </section>
     <nav id="preview-pager" class="pager" aria-label="Browse plot pages" hidden>
       <button id="preview-prev" class="secondary" disabled>Previous</button>
@@ -42,16 +42,24 @@
     <nav id="plain-links" class="plain-links" aria-label="Full-size plots without AR">
       <span>View without AR:</span>
     </nav>
+    <p id="debug-version" hidden></p>
+    <footer class="credits">AR powered by 8th Wall, created by Niantic Spatial, Inc.
+      © 2026 Niantic Spatial, Inc. All rights reserved.
+      Licensed under the <a href="./vendor/xr/LICENSE.txt" target="_blank" rel="noopener">XR Engine License Agreement</a>,
+      including its warranty disclaimer. <a href="./vendor/Three-LICENSE.txt" target="_blank" rel="noopener">Three.js license</a>.
+    </footer>
     <noscript><p>Enable JavaScript to load the plot list and the AR view.</p></noscript>
   </main>
   <div id="ar" hidden>
-    <div id="scene-container"></div>
+    <div id="scene-container"><canvas id="camerafeed" aria-label="Live augmented reality camera"></canvas></div>
     <div class="ar-top">
       <p id="tracking" role="status" aria-live="polite">Opening camera…</p>
       <button id="stop" class="secondary">Close AR</button>
     </div>
+    <p id="ar-debug" hidden></p>
     <div class="ar-bottom">
-      <p>Keep the PCE graph in view. The extra plots appear on its right.</p>
+      <p>Once placed, explore the panel by moving your phone. If it drifts, scan the printed image again.</p>
+      <button id="reset-anchors" class="secondary" disabled>Reset placement</button>
       <nav id="ar-pager" class="pager" aria-label="Browse plot pages in AR" hidden>
         <button id="ar-prev" class="secondary" disabled>Previous</button>
         <select id="ar-page" aria-label="Choose a plot page in AR"></select>

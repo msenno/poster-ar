@@ -1,136 +1,121 @@
 (() => {
   'use strict';
+  const VERSION = 'World tracking 1';
   const config = window.POSTER_AR || {};
-  // Same smoothing and loss tolerance as stability update 3.
-  const missTolerance = Number.isInteger(config.missTolerance) && config.missTolerance >= 0
-    ? config.missTolerance : 15;
-  const warmupTolerance = Number.isInteger(config.warmupTolerance) && config.warmupTolerance >= 0
-    ? config.warmupTolerance : 8;
-  const filterMinCF = Number.isFinite(config.filterMinCF) && config.filterMinCF > 0
-    ? config.filterMinCF : 0.001;
-  const filterBeta = Number.isFinite(config.filterBeta) && config.filterBeta >= 0
-    ? config.filterBeta : 0.01;
   const $ = id => document.getElementById(id);
-  const message = text => { $('message').textContent = text; };
-  let targets = [], activeTarget = null, targetSelect = null;
-  let pages = [], pageIndex = -1, plots = [], scene = null, anchor = null;
-  let graphics = null, loadingPage = false, startingCamera = false, needsReload = false;
-  let loadSerial = 0, visibleTargetIndex = null, closingCamera = false;
-  const debug = new URLSearchParams(window.location.search).get('arDebug') === '1';
-  let foundCount = 0, lostCount = 0, trackingState = 'waiting';
-  let debugPanel = null;
-  if (debug) {
-    debugPanel = document.createElement('div');
-    debugPanel.id = 'ar-debug';
-    debugPanel.style.cssText = 'position:absolute;top:78px;left:14px;right:14px;z-index:6;padding:8px 10px;background:#fff;color:#172a39;font:12px/1.4 monospace;border-radius:6px;pointer-events:none;';
-    $('ar').appendChild(debugPanel);
-    const notice = document.createElement('p');
-    notice.textContent = 'Tracking test · multi-target update 1 loaded. Camera event counts will appear in AR.';
-    $('setup').appendChild(notice);
-  }
-  function updateDebug() {
-    if (debugPanel) debugPanel.textContent = `Multi-target 1 | ${trackingState} | target: ${visibleTargetIndex ?? 'none'} | Found: ${foundCount} Lost: ${lostCount} | smoothing: ${filterMinCF}, ${filterBeta} | warmup: ${warmupTolerance}, miss: ${missTolerance}`;
-  }
-  updateDebug();
+  const debug = new URLSearchParams(location.search).get('arDebug') === '1';
+  let targets = [], active = null, metadata = [], anchors = null, xrScene = null;
+  let ready = false, cameraActive = false, starting = false, token = 0, modules = [];
+  let worldStatus = 'LIMITED', scanning = false, found = 0, lost = 0, startupTimer;
+  const streams = new Set();
+  const say = text => { $('message').textContent = text; };
 
   function updateControls() {
-    const locked = loadingPage || startingCamera || needsReload;
+    $('start').disabled = !ready || starting;
+    $('target-select').disabled = !targets.length;
+    if (active) $('target-select').value = active.name;
     for (const prefix of ['preview', 'ar']) {
-      $(`${prefix}-pager`).hidden = pages.length <= 1;
-      $(`${prefix}-prev`).disabled = locked || pageIndex <= 0;
-      $(`${prefix}-next`).disabled = locked || pageIndex >= pages.length - 1;
-      $(`${prefix}-page`).disabled = locked;
-      $(`${prefix}-page`).value = String(Math.max(0, pageIndex));
+      $(`${prefix}-pager`).hidden = !active || active.pages.length <= 1;
+      $(`${prefix}-prev`).disabled = !active || active.loading || active.pageIndex <= 0;
+      $(`${prefix}-next`).disabled = !active || active.loading || active.pageIndex >= active.pages.length - 1;
+      $(`${prefix}-page`).disabled = !active || active.loading;
+      if (active) $(`${prefix}-page`).value = String(active.pageIndex);
     }
-    if (targetSelect) {
-      targetSelect.disabled = startingCamera || needsReload;
-      targetSelect.value = String(activeTarget?.targetIndex ?? '');
-    }
-    // One gallery with a missing file must not block recognition of other targets.
-    $('start').disabled = !needsReload && (startingCamera || !targets.length);
+    $('reset-anchors').disabled = !anchors?.count;
   }
 
-  function updateTrackingText() {
-    if (!scene || startingCamera || closingCamera) return;
-    if (visibleTargetIndex === null) {
-      $('tracking').textContent = 'Point at any recognition image on the poster';
-    } else if (loadingPage) {
-      $('tracking').textContent = `${activeTarget.label} · loading figures…`;
-    } else if (plots.length) {
-      $('tracking').textContent = `${activeTarget.label} · page ${pageIndex + 1} of ${pages.length}`;
-    } else {
-      $('tracking').textContent = `${activeTarget.label} found · figures could not load`;
+  function updateStatus() {
+    if (cameraActive) {
+      let text;
+      if (starting) text = 'Opening camera… Allow camera and motion access when asked.';
+      else if (worldStatus !== 'NORMAL') text = 'Move your phone slowly across the poster to establish tracking.';
+      else if (!scanning) text = 'Preparing recognition images…';
+      else if (!anchors?.count) text = 'Point at a recognition image on the poster.';
+      else if (active?.error) text = `${active.label}: ${active.error}`;
+      else if (active?.loading) text = `${active.label} found · loading panel…`;
+      else text = `${active?.label || 'Panel'} placed · move closer to explore`;
+      $('tracking').textContent = text;
     }
+    if (debug) {
+      $('ar-debug').textContent = `${VERSION} | World: ${worldStatus} | Images ready: ${scanning} | Placed: ${anchors?.count || 0} | Found: ${found} Lost: ${lost} | ${active?.name || 'none'}`;
+    }
+    updateControls();
   }
 
-  function clearGraphics() {
-    if (!graphics) return;
-    graphics.parent?.remove(graphics);
-    graphics.traverse(object => {
+  function disposeGroup(group) {
+    if (!group) return;
+    group.parent?.remove(group);
+    group.traverse(object => {
       if (!object.isMesh) return;
       object.geometry.dispose();
-      if (object.material.map) object.material.map.dispose();
+      object.material.map?.dispose();
       object.material.dispose();
     });
-    graphics = null;
   }
 
-  function renderARPlots() {
-    if (!anchor?.object3D || !scene?.renderer) return;
-    clearGraphics();
-    if (!plots.length) return;
-    const THREE = window.AFRAME.THREE;
-    graphics = new THREE.Group();
-    plots.forEach(plot => {
-      // One opaque surface per figure, as in the smoother version.
-      const canvas = document.createElement('canvas');
-      canvas.width = plot.width;
-      canvas.height = plot.height;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('Unable to prepare the plot texture.');
-      context.fillStyle = '#ffffff';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(plot.image, 0, 0, canvas.width, canvas.height);
-      const texture = new THREE.CanvasTexture(canvas);
-      if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
-      else texture.encoding = THREE.sRGBEncoding;
-      texture.generateMipmaps = false;
-      texture.minFilter = THREE.LinearFilter;
-      texture.needsUpdate = true;
-      const imagePlane = new THREE.Mesh(
-        new THREE.PlaneGeometry(plot.planeWidth, plot.planeHeight),
-        new THREE.MeshBasicMaterial({map: texture, side: THREE.DoubleSide, transparent: false, toneMapped: false})
-      );
-      imagePlane.position.set(plot.x, plot.y, plot.z);
-      graphics.add(imagePlane);
-    });
-    anchor.object3D.add(graphics);
+  function renderPanel(target) {
+    const entry = anchors?.entries.get(target.name);
+    if (!entry || !xrScene || !target.plots.length) return;
+    const THREE = window.THREE;
+    const group = new THREE.Group();
+    const limit = Math.min(4096, xrScene.renderer.capabilities.maxTextureSize);
+    try {
+      for (const plot of target.plots) {
+        const canvas = document.createElement('canvas');
+        const ratio = Math.min(1, limit / Math.max(plot.width, plot.height));
+        canvas.width = Math.max(1, Math.round(plot.width * ratio));
+        canvas.height = Math.max(1, Math.round(plot.height * ratio));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Unable to prepare the panel image.');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(plot.image, 0, 0, canvas.width, canvas.height);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.generateMipmaps = false;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(plot.planeWidth, plot.planeHeight),
+          new THREE.MeshBasicMaterial({map: texture, side: THREE.DoubleSide, toneMapped: false})
+        );
+        mesh.position.set(plot.x, plot.y, plot.z);
+        group.add(mesh);
+      }
+      disposeGroup(target.graphics);
+      target.graphics = group;
+      entry.group.add(group);
+    } catch (error) {
+      disposeGroup(group);
+      throw error;
+    }
   }
 
   function renderPreview() {
-    if (!activeTarget) return;
-    const layout = activeTarget.layout;
-    $('target-preview').src = activeTarget.targetImage;
-    $('target-preview').alt = `${activeTarget.label}: printed recognition image.`;
+    if (!active) return;
+    const layout = active.layout;
+    $('target-preview').src = active.targetImage;
+    $('target-preview').alt = `${active.label}: printed recognition image`;
     $('pair').style.gridTemplateColumns = `1fr ${layout.overlayWidth}fr`;
     $('pair').style.columnGap = `${100 * layout.gap / (1 + layout.gap + layout.overlayWidth)}%`;
     const captions = document.querySelector('.preview-captions');
     captions.style.gridTemplateColumns = $('pair').style.gridTemplateColumns;
     captions.style.columnGap = $('pair').style.columnGap;
-    if (captions.firstElementChild) captions.firstElementChild.textContent = activeTarget.label;
-    const stackHeight = plots.reduce((sum, plot) => sum + plot.planeHeight, 0) + layout.stackGap * Math.max(0, plots.length - 1);
-    $('plot-stack').style.transform = stackHeight > 0 ? `translateY(${-100 * layout.verticalOffset / stackHeight}%)` : '';
+    captions.firstElementChild.textContent = active.label;
     $('plot-stack').replaceChildren();
     $('plain-links').replaceChildren();
-    const linkLabel = document.createElement('span');
-    linkLabel.textContent = 'View without AR:';
-    $('plain-links').appendChild(linkLabel);
-    plots.forEach((plot, index) => {
-      const preview = document.createElement('img');
-      preview.src = plot.src;
-      preview.alt = `${plot.label}, AR figure ${index + 1} on this page, from top to bottom.`;
-      preview.style.marginTop = index ? `${100 * layout.stackGap / layout.overlayWidth}%` : '0';
-      $('plot-stack').appendChild(preview);
+    const label = document.createElement('span');
+    label.textContent = 'View without AR:';
+    $('plain-links').appendChild(label);
+    const height = active.plots.reduce((sum, plot) => sum + plot.planeHeight, 0)
+      + layout.stackGap * Math.max(0, active.plots.length - 1);
+    $('plot-stack').style.transform = height ? `translateY(${-100 * layout.verticalOffset / height}%)` : '';
+    active.plots.forEach((plot, index) => {
+      const image = document.createElement('img');
+      image.src = plot.src;
+      image.alt = plot.label;
+      image.style.marginTop = index ? `${100 * layout.stackGap / layout.overlayWidth}%` : '0';
+      $('plot-stack').appendChild(image);
       const link = document.createElement('a');
       link.href = plot.src;
       link.target = '_blank';
@@ -138,280 +123,312 @@
       link.textContent = `Open ${plot.label}`;
       $('plain-links').appendChild(link);
     });
-    const names = plots.map(plot => plot.label).join(' · ');
-    $('plot-names').textContent = activeTarget.label;
-    $('ar-caption').textContent = names ? `AR, top to bottom: ${names}` : 'AR figures';
-    // Keep document.title and #heading from index.html. They are not reset here.
+    $('ar-caption').textContent = active.plots.map(plot => plot.label).join(' · ') || 'AR panel';
+    $('plot-names').textContent = active.label;
   }
 
-  async function goToPage(index) {
-    if (!activeTarget || needsReload || closingCamera || index < 0 || index >= pages.length) return;
-    const requestedTarget = activeTarget;
-    const serial = ++loadSerial;
-    loadingPage = true;
-    updateControls();
-    message(`Loading ${requestedTarget.label} figures…`);
-    updateTrackingText();
+  async function loadPage(target, index) {
+    if (!target || index < 0 || index >= target.pages.length) return;
+    const serial = ++target.loadSerial;
+    target.loading = true;
+    target.error = '';
+    updateStatus();
     try {
-      const images = await Promise.all(requestedTarget.pages[index].map(async entry => {
+      const images = await Promise.all(target.pages[index].map(async entry => {
         const image = new Image();
         image.src = entry.src;
         try { await image.decode(); }
-        catch (_) { throw new Error(`Cannot load ${entry.src}. Check the filename, extension and letter case in config.js, and upload the image to assets/.`); }
+        catch (_) { throw new Error(`Cannot load ${entry.src}. Check its filename and upload it to assets/.`); }
         return {...entry, image, width: image.naturalWidth, height: image.naturalHeight};
       }));
-      // A slow response from the previous target must never appear on a new one.
-      if (serial !== loadSerial || requestedTarget !== activeTarget) return;
-      plots = window.posterLayout(images, requestedTarget.layout);
-      pageIndex = index;
-      requestedTarget.savedPage = index;
-      renderPreview();
-      renderARPlots();
-      message(`${requestedTarget.label} · page ${index + 1} of ${pages.length}. The figures appear to the right of its recognition image.`);
+      // Each target owns its request and meshes. Slow loads cannot cross targets.
+      if (serial !== target.loadSerial) return;
+      target.plots = window.posterLayout(images, target.layout);
+      target.pageIndex = index;
+      renderPanel(target);
+      if (target === active) {
+        renderPreview();
+        say(`${target.label}: ${target.plots.map(plot => plot.label).join(' · ')}. Scan the printed image to place the panel beside it.`);
+      }
     } catch (error) {
-      if (serial !== loadSerial || requestedTarget !== activeTarget) return;
-      message(error.message || 'Check this target’s image entries in config.js.');
+      if (serial !== target.loadSerial) return;
+      target.error = error.message || 'Panel could not load.';
+      if (target === active) say(target.error);
     } finally {
-      if (serial === loadSerial && requestedTarget === activeTarget) {
-        loadingPage = false;
-        updateControls();
-        updateTrackingText();
+      if (serial === target.loadSerial) {
+        target.loading = false;
+        updateStatus();
       }
     }
   }
 
-  function selectTarget(targetIndex) {
-    const next = targets.find(target => target.targetIndex === targetIndex);
-    if (!next || needsReload || closingCamera) return;
-    if (next === activeTarget && (plots.length || loadingPage)) return;
-    ++loadSerial;
-    clearGraphics();
-    activeTarget = next;
-    anchor = next.anchor;
-    pages = next.pages;
-    plots = [];
-    pageIndex = -1;
-    loadingPage = false;
+  function selectTarget(name) {
+    const target = targets.find(item => item.name === name);
+    if (!target || target === active) return;
+    active = target;
     for (const prefix of ['preview', 'ar']) {
       const select = $(`${prefix}-page`);
       select.replaceChildren();
-      pages.forEach((page, index) => {
+      target.pages.forEach((page, index) => {
         const option = document.createElement('option');
         option.value = String(index);
-        option.textContent = `${index + 1} / ${pages.length} · ${page.map(entry => entry.label).join(' · ')}`;
+        option.textContent = `${index + 1} / ${target.pages.length} · ${page.map(plot => plot.label).join(' · ')}`;
         select.appendChild(option);
       });
     }
     renderPreview();
-    updateControls();
-    goToPage(next.savedPage);
+    updateStatus();
+    if (!target.plots.length && !target.loading) void loadPage(target, target.pageIndex);
+    else say(`${target.label}: ${target.plots.map(plot => plot.label).join(' · ')}.`);
   }
 
-  for (const prefix of ['preview', 'ar']) {
-    $(`${prefix}-prev`).addEventListener('click', () => goToPage(pageIndex - 1));
-    $(`${prefix}-next`).addEventListener('click', () => goToPage(pageIndex + 1));
-    $(`${prefix}-page`).addEventListener('change', event => goToPage(Number(event.target.value)));
+  function onImage(detail, isFound) {
+    if (!cameraActive || !anchors) return;
+    if (isFound) found++;
+    const entry = anchors.entries.get(detail?.name);
+    const first = entry && !entry.anchored;
+    if (anchors.update(detail)) {
+      if (first || isFound) selectTarget(detail.name);
+      const target = targets.find(item => item.name === detail.name);
+      if (target && !target.graphics && target.plots.length) renderPanel(target);
+    }
+    if (isFound || first) updateStatus();
+  }
+
+  function resizeCanvas() {
+    const canvas = $('camerafeed');
+    const ratio = Math.min(2, window.devicePixelRatio || 1);
+    const width = Math.round(window.innerWidth * ratio);
+    const height = Math.round(window.innerHeight * ratio);
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
   }
 
   function stopCamera() {
-    closingCamera = true;
-    ++loadSerial;
-    const system = scene?.systems?.['mindar-image-system'];
-    if (system?.controller) {
-      try { system.controller.stopProcessVideo(); } catch (_) {}
-    }
-    const videos = new Set(document.querySelectorAll('video'));
-    if (system?.video) videos.add(system.video);
-    videos.forEach(video => {
-      if (video.srcObject) video.srcObject.getTracks().forEach(track => track.stop());
-      video.pause();
-    });
-    clearGraphics();
-  }
-
-  function fail(text) {
-    stopCamera();
-    if (scene) scene.pause();
-    needsReload = true;
-    loadingPage = false;
-    startingCamera = false;
-    $('start').textContent = 'Reload and try again';
+    cameraActive = false;
+    starting = false;
+    ++token;
+    clearTimeout(startupTimer);
+    try { window.XR8?.stop(); } catch (_) {}
+    for (const stream of streams) stream.getTracks().forEach(track => track.stop());
+    streams.clear();
+    targets.forEach(target => { disposeGroup(target.graphics); target.graphics = null; });
+    if (anchors) for (const {group} of anchors.entries.values()) group.parent?.remove(group);
+    anchors = null;
+    xrScene = null;
+    try { window.XR8?.removeCameraPipelineModules(modules); } catch (_) {}
+    modules = [];
     $('ar').hidden = true;
     $('setup').hidden = false;
+    document.body.classList.remove('camera-open');
     updateControls();
-    message(text);
   }
 
-  $('stop').addEventListener('click', () => {
+  function failCamera(error) {
+    if (!cameraActive) return;
+    console.error('Poster AR camera error:', error);
     stopCamera();
-    window.location.reload();
-  });
-  window.addEventListener('pagehide', stopCamera);
-  window.addEventListener('pageshow', event => {
-    if (event.persisted) window.location.reload();
-  });
+    let detail = typeof error === 'string' ? error : error?.message || error?.error?.message;
+    if (error?.type === 'permission' && error?.status === 'denied') {
+      const motion = /motion|orientation/.test(error.permission || '');
+      detail = motion
+        ? 'Motion access is unavailable. Open this page on your phone, allow motion sensors for this site in the browser settings, then reload and retry.'
+        : 'A required permission was denied. Allow camera and motion access for this site, then reload and retry.';
+    }
+    say(`AR could not start or continue. ${detail || 'Open the site in Chrome on Android or Safari on iPhone, allow camera and motion access, and try again.'}`);
+    if (debug) {
+      let diagnostic;
+      try { diagnostic = JSON.stringify(error, Object.getOwnPropertyNames(error || {})); }
+      catch (_) { diagnostic = String(error); }
+      $('debug-version').textContent = `${VERSION} · camera error: ${diagnostic || 'Unknown error'}`;
+    }
+    $('start').focus();
+  }
 
-  $('start').addEventListener('click', async () => {
-    if (needsReload) { window.location.reload(); return; }
-    if (!targets.length || startingCamera || scene) return;
-    if (location.protocol === 'file:' || !window.isSecureContext) {
-      message('For camera access, open this page at its HTTPS website address. The layout preview works without a camera.');
+  function startCamera() {
+    if (!ready || cameraActive) return;
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      say('Open the HTTPS GitHub Pages address in your phone browser to use the camera.');
       return;
     }
-    if (!window.AFRAME || !window.MINDAR?.IMAGE) {
-      message('The AR components did not load. Check that the vendor folder was uploaded, then reload.');
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      message('Camera access is unavailable here. Open this link directly in Safari on iPhone or Chrome on Android.');
-      return;
-    }
-    const probe = document.createElement('canvas');
-    const gl = probe.getContext('webgl2') || probe.getContext('webgl');
-    if (!gl) {
-      message('This browser cannot run the AR graphics. Use the links below to open the figures.');
-      return;
-    }
-    gl.getExtension('WEBGL_lose_context')?.loseContext();
-    startingCamera = true;
-    closingCamera = false;
-    updateControls();
-    message('Loading the recognition file…');
+    const XR8 = window.XR8;
+    const current = ++token;
+    cameraActive = true;
+    starting = true;
+    scanning = false;
+    worldStatus = 'LIMITED';
+    found = lost = 0;
+    $('setup').hidden = true;
+    $('ar').hidden = false;
+    document.body.classList.add('camera-open');
+    resizeCanvas();
+    updateStatus();
+    const live = () => cameraActive && current === token;
     try {
-      const response = await fetch(config.targetFile);
-      if (!response.ok) throw new Error('The recognition file could not load. Check targetFile in config.js and upload the compiled .mind file.');
-      await response.arrayBuffer();
-      if (closingCamera) return;
-      $('setup').hidden = true;
-      $('ar').hidden = false;
-      $('tracking').textContent = 'Opening camera…';
-      scene = document.createElement('a-scene');
-      scene.setAttribute('embedded', '');
-      // All targets are searchable; one is tracked at a time to keep phone load low.
-      scene.setAttribute('mindar-image', `imageTargetSrc: ${config.targetFile}; maxTrack: 1; missTolerance: ${missTolerance}; warmupTolerance: ${warmupTolerance}; filterMinCF: ${filterMinCF}; filterBeta: ${filterBeta}; autoStart: false; uiLoading: no; uiScanning: no; uiError: no;`);
-      scene.setAttribute('renderer', 'colorManagement: true; alpha: true; antialias: true');
-      scene.setAttribute('vr-mode-ui', 'enabled: false');
-      scene.setAttribute('device-orientation-permission-ui', 'enabled: false');
-      const camera = document.createElement('a-camera');
-      camera.setAttribute('position', '0 0 0');
-      camera.setAttribute('look-controls', 'enabled: false');
-      camera.setAttribute('wasd-controls', 'enabled: false');
-      scene.appendChild(camera);
-      targets.forEach(target => {
-        target.anchor = document.createElement('a-entity');
-        target.anchor.setAttribute('mindar-image-target', `targetIndex: ${target.targetIndex}`);
-        scene.appendChild(target.anchor);
-        target.anchor.addEventListener('targetFound', () => {
-          if (closingCamera) return;
-          foundCount += 1;
-          visibleTargetIndex = target.targetIndex;
-          trackingState = 'found';
-          selectTarget(target.targetIndex);
-          updateDebug();
-          updateTrackingText();
-        });
-        target.anchor.addEventListener('targetLost', () => {
-          if (closingCamera) return;
-          lostCount += 1;
-          if (visibleTargetIndex === target.targetIndex) {
-            visibleTargetIndex = null;
-            trackingState = 'lost';
-            updateTrackingText();
-          }
-          updateDebug();
-        });
+      XR8.XrController.configure({
+        disableWorldTracking: false,
+        scale: 'responsive',
+        imageTargetData: metadata,
       });
-      anchor = activeTarget.anchor;
-      scene.addEventListener('arReady', () => {
-        if (closingCamera) return;
-        startingCamera = false;
-        trackingState = visibleTargetIndex === null ? 'searching' : 'found';
-        updateControls();
-        updateDebug();
-        updateTrackingText();
-      });
-      scene.addEventListener('arError', () => {
-        fail('The AR view could not start. Check camera permission and the compiled recognition file, then reload.');
-      });
-      scene.addEventListener('renderstart', () => {
-        try {
-          renderARPlots();
-          scene.systems['mindar-image-system'].start();
-        } catch (_) {
-          fail('The AR view could not start. Reload to try again, or open the figures using the links below.');
+      XR8.Threejs.configure({renderCameraTexture: false});
+      modules = [
+        XR8.XrController.pipelineModule(),
+        XR8.GlTextureRenderer.pipelineModule(),
+        XR8.Threejs.pipelineModule(),
+        {
+          name: 'poster-world-panels',
+          onStart: () => {
+            if (!live()) return;
+            clearTimeout(startupTimer);
+            xrScene = XR8.Threejs.xrScene();
+            xrScene.camera.position.set(0, 2, 0);
+            XR8.XrController.updateCameraProjectionMatrix({
+              origin: xrScene.camera.position, facing: xrScene.camera.quaternion,
+            });
+            anchors = new window.PosterWorldAnchors(window.THREE, xrScene.scene, targets);
+            anchors.setTracking(worldStatus);
+            starting = false;
+            updateStatus();
+          },
+          onUpdate: ({processCpuResult}) => {
+            if (!live()) return;
+            const status = processCpuResult?.reality?.trackingStatus;
+            if (status && status !== worldStatus) {
+              worldStatus = status;
+              anchors?.setTracking(status);
+              updateStatus();
+            }
+          },
+          onCameraStatusChange: ({status, stream}) => {
+            if (stream) {
+              if (live()) streams.add(stream);
+              else stream.getTracks().forEach(track => track.stop());
+            }
+            if (live() && status === 'failed') failCamera(new Error('Camera permission was denied or the camera is unavailable. Enable camera and motion access, then retry.'));
+          },
+          onException: error => { if (live()) failCamera(error); },
+          listeners: [
+            {event: 'reality.trackingstatus', process: ({detail}) => {
+              if (!live()) return;
+              worldStatus = detail.status;
+              anchors?.setTracking(worldStatus);
+              updateStatus();
+            }},
+            {event: 'reality.imagescanning', process: () => { if (live()) { scanning = true; updateStatus(); } }},
+            {event: 'reality.imagefound', process: ({detail}) => { if (live()) onImage(detail, true); }},
+            {event: 'reality.imageupdated', process: ({detail}) => { if (live()) onImage(detail, false); }},
+            {event: 'reality.imagelost', process: ({detail}) => {
+              if (!live()) return;
+              lost++;
+              anchors?.imageLost(detail.name);
+              updateStatus();
+            }},
+          ],
+        },
+      ];
+      XR8.addCameraPipelineModules(modules);
+      startupTimer = setTimeout(() => {
+        if (live() && starting) failCamera(new Error('Camera startup timed out. Reload the page and allow camera and motion access.'));
+      }, 45000);
+      // MOBILE is intentional: ANY permits desktop image tracking without SLAM.
+      // Run directly from the click, with resources prepared, for motion permissions.
+      Promise.resolve(XR8.run({
+        canvas: $('camerafeed'),
+        allowedDevices: XR8.XrConfig.device().MOBILE,
+        cameraConfig: {direction: XR8.XrConfig.camera().BACK},
+        glContextConfig: {alpha: false, antialias: true},
+      })).catch(error => { if (live()) failCamera(error); });
+    } catch (error) { failCamera(error); }
+  }
+
+  function loadEngine() {
+    return new Promise((resolve, reject) => {
+      const finish = async () => {
+        cleanup();
+        try { await window.XR8.loadChunk('slam'); resolve(); }
+        catch (error) { reject(error); }
+      };
+      const failed = () => { cleanup(); reject(new Error('The AR engine could not load. Upload the entire vendor/xr folder, then reload.')); };
+      const timer = setTimeout(failed, 60000);
+      const cleanup = () => { clearTimeout(timer); window.removeEventListener('xrloaded', finish); script.removeEventListener('error', failed); };
+      const script = document.createElement('script');
+      script.src = './vendor/xr/xr.js';
+      script.async = true;
+      script.dataset.preloadChunks = 'slam';
+      script.addEventListener('error', failed, {once: true});
+      window.addEventListener('xrloaded', finish, {once: true});
+      document.head.appendChild(script);
+    });
+  }
+
+  async function init() {
+    try {
+      if (typeof config.pageTitle === 'string') document.title = config.pageTitle;
+      if (typeof config.heading === 'string') $('heading').textContent = config.heading;
+      if (!Array.isArray(config.targets) || !config.targets.length) throw new Error('Add targets in config.js.');
+      const names = new Set();
+      targets = config.targets.map(item => {
+        if (!item.name || names.has(item.name) || !item.label || !item.targetImage || !item.targetData) {
+          throw new Error('Each target needs a unique name, label, targetImage and targetData in config.js.');
         }
-      }, {once: true});
-      $('scene-container').appendChild(scene);
-    } catch (error) {
-      fail(error.message || 'The AR view could not open. Please reload and try again.');
-    }
-  });
-
-  try {
-    const entries = config.targets === undefined
-      ? [{targetIndex: 0, label: 'Recognition image', targetImage: config.targetImage, overlays: config.overlays}]
-      : config.targets;
-    if (!Array.isArray(entries) || !entries.length) throw new Error('Add recognition targets to config.js.');
-    if (typeof config.targetFile !== 'string' || !config.targetFile.trim()) throw new Error('Set targetFile in config.js.');
-    const usedIndices = new Set();
-    const parsedTargets = entries.map(entry => {
-      if (!entry || !Number.isInteger(entry.targetIndex) || entry.targetIndex < 0 || usedIndices.has(entry.targetIndex)) {
-        throw new Error('Every recognition target needs a unique, non-negative integer targetIndex in config.js.');
-      }
-      usedIndices.add(entry.targetIndex);
-      if (typeof entry.label !== 'string' || !entry.label.trim() || typeof entry.targetImage !== 'string' || !entry.targetImage.trim()) {
-        throw new Error(`Set label and targetImage for target ${entry.targetIndex} in config.js.`);
-      }
-      const layout = {};
-      const defaults = {overlayWidth: 0.90, gap: 0.08, stackGap: 0.07, verticalOffset: 0};
-      for (const [key, fallback] of Object.entries(defaults)) layout[key] = Number(entry[key] ?? config[key] ?? fallback);
-      const targetPages = window.posterPages(entry.overlays, Number(entry.imagesPerPage ?? config.imagesPerPage ?? 2));
-      window.posterLayout([{width: 1, height: 1}], layout);
-      return {...entry, layout, pages: targetPages, savedPage: 0, anchor: null};
-    });
-    targets = parsedTargets;
-
-    // Text overrides are opt-in; otherwise retain the user's edited HTML titles.
-    if (typeof config.pageTitle === 'string') document.title = config.pageTitle;
-    if (typeof config.heading === 'string') $('heading').textContent = config.heading;
-    // Update only unedited wording from the original single-graph starter.
-    const replacements = [
-      ['.intro', 'Point your phone at the PCE graph in the poster. Additional plots will appear on its right.', 'Point your phone at a recognition image on the poster. Its additional figures will appear on the right.'],
-      ['.hint', 'Turn your phone sideways and keep the whole PCE graph in view, with space on its right.', 'Turn your phone sideways and keep the whole recognition image in view, with space on its right.'],
-      ['.ar-bottom p', 'Keep the PCE graph in view. The extra plots appear on its right.', 'Keep the recognition image in view. Point at another one to change the figures.'],
-    ];
-    replacements.forEach(([selector, previous, next]) => {
-      const element = document.querySelector(selector);
-      if (element?.textContent.trim() === previous) element.textContent = next;
-    });
-    const previewSection = document.querySelector('.preview');
-    if (previewSection?.getAttribute('aria-label') === 'Preview of the printed PCE graph with additional plots beside it') {
-      previewSection.setAttribute('aria-label', 'Preview of a printed recognition image and its additional figures');
-    }
-    if (targets.length > 1) {
-      const picker = document.createElement('div');
-      picker.className = 'pager';
-      const label = document.createElement('label');
-      label.htmlFor = 'preview-target';
-      label.textContent = 'Preview section';
-      targetSelect = document.createElement('select');
-      targetSelect.id = 'preview-target';
+        names.add(item.name);
+        const layout = {
+          overlayWidth: item.overlayWidth ?? config.overlayWidth ?? 0.9,
+          gap: item.gap ?? config.gap ?? 0.08,
+          stackGap: item.stackGap ?? config.stackGap ?? 0.07,
+          verticalOffset: item.verticalOffset ?? config.verticalOffset ?? 0,
+        };
+        const pages = window.posterPages(item.overlays, item.imagesPerPage ?? config.imagesPerPage ?? 1);
+        return {...item, layout, pages, pageIndex: 0, plots: [], graphics: null, loading: false, loadSerial: 0, error: ''};
+      });
       targets.forEach(target => {
         const option = document.createElement('option');
-        option.value = String(target.targetIndex);
+        option.value = target.name;
         option.textContent = target.label;
-        targetSelect.appendChild(option);
+        $('target-select').appendChild(option);
       });
-      targetSelect.addEventListener('change', event => selectTarget(Number(event.target.value)));
-      picker.appendChild(label);
-      picker.appendChild(targetSelect);
-      const before = document.querySelector('.preview-label') || previewSection;
-      $('setup').insertBefore(picker, before);
-    }
-    selectTarget(targets[0].targetIndex);
-  } catch (error) {
-    targets = [];
-    updateControls();
-    message(error.message || 'Check config.js, then reload the page.');
+      selectTarget(targets[0].name);
+      const dataPromise = Promise.all(targets.map(async target => {
+        const response = await fetch(target.targetData);
+        if (!response.ok) throw new Error(`Cannot load ${target.targetData}. Upload the image-targets folder.`);
+        const data = await response.json();
+        if (data.name !== target.name || data.type !== 'PLANAR' || !data.imagePath || !data.properties) {
+          throw new Error(`Recognition data does not match ${target.name}. Check targetData and name in config.js.`);
+        }
+        const p = data.properties;
+        if (![p.width, p.height, p.originalWidth, p.originalHeight].every(value => Number.isFinite(value) && value > 0)
+            || ![p.left, p.top].every(value => Number.isFinite(value) && value >= 0)
+            || p.left + p.width > p.originalWidth || p.top + p.height > p.originalHeight) {
+          throw new Error(`Invalid recognition crop for ${target.name}. Regenerate its targetData.`);
+        }
+        target.recognitionProperties = p;
+        // Official CLI imagePath is relative to the WEBSITE root, not this JSON.
+        // Resolve to an absolute URL so GitHub repository subpaths work correctly.
+        data.imagePath = new URL(data.imagePath, document.baseURI).href;
+        return data;
+      }));
+      [metadata] = await Promise.all([dataPromise, loadEngine()]);
+      ready = true;
+      updateControls();
+      if (debug) $('debug-version').textContent = `${VERSION} loaded · image recognition + world tracking`;
+    } catch (error) { say(error.message || 'The AR setup could not load. Reload and try again.'); }
   }
+
+  $('target-select').addEventListener('change', event => selectTarget(event.target.value));
+  for (const prefix of ['preview', 'ar']) {
+    $(`${prefix}-prev`).addEventListener('click', () => void loadPage(active, active.pageIndex - 1));
+    $(`${prefix}-next`).addEventListener('click', () => void loadPage(active, active.pageIndex + 1));
+    $(`${prefix}-page`).addEventListener('change', event => void loadPage(active, Number(event.target.value)));
+  }
+  $('start').addEventListener('click', startCamera);
+  $('stop').addEventListener('click', () => { stopCamera(); say('Camera closed. Scan the poster again to place panels in a new session.'); $('start').focus(); });
+  $('reset-anchors').addEventListener('click', () => { anchors?.clear(); updateStatus(); });
+  window.addEventListener('resize', () => { if (cameraActive) resizeCanvas(); });
+  window.addEventListener('pagehide', () => { if (cameraActive) stopCamera(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && cameraActive) { stopCamera(); say('Camera closed while the page was in the background. Open AR to scan again.'); }
+  });
+  $('ar-debug').hidden = !debug;
+  $('debug-version').hidden = !debug;
+  void init();
 })();
